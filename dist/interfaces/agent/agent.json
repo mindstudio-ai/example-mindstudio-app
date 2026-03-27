@@ -1,0 +1,16 @@
+{
+  "agent": {
+    "model": "claude-4-5-haiku",
+    "temperature": 0.5,
+    "maxTokens": 15000,
+    "systemPrompt": "system.md",
+    "tools": [
+      { "method": "create-todo", "description": "tools/createTodo.md" },
+      { "method": "list-todos", "description": "tools/listTodos.md" },
+      { "method": "update-todo", "description": "tools/updateTodo.md" },
+      { "method": "toggle-todo", "description": "tools/toggleTodo.md" },
+      { "method": "delete-todo", "description": "tools/deleteTodo.md" }
+    ],
+    "webInterfacePath": "/chat"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "appId": "00000000-0000-0000-0000-000000000001",
+  "name": "Todo List Agent",
+  "description": "A to-do list manager with a web UI and a conversational agent interface.",
+  "roles": [],
+  "tables": [
+    {
+      "name": "todos",
+      "path": "dist/methods/src/tables/todos.ts",
+      "export": "Todos"
+    }
+  ],
+  "methods": [
+    {
+      "id": "create-todo",
+      "name": "Create Todo",
+      "description": "Create a new to-do item with a title and optional AI notes.",
+      "path": "dist/methods/src/createTodo.ts",
+      "export": "createTodo"
+    },
+    {
+      "id": "list-todos",
+      "name": "List Todos",
+      "description": "List all to-do items, optionally filtered by completion status.",
+      "path": "dist/methods/src/listTodos.ts",
+      "export": "listTodos"
+    },
+    {
+      "id": "update-todo",
+      "name": "Update Todo",
+      "description": "Update fields on an existing to-do item.",
+      "path": "dist/methods/src/updateTodo.ts",
+      "export": "updateTodo"
+    },
+    {
+      "id": "toggle-todo",
+      "name": "Toggle Todo",
+      "description": "Toggle the completed status of a to-do item.",
+      "path": "dist/methods/src/toggleTodo.ts",
+      "export": "toggleTodo"
+    },
+    {
+      "id": "delete-todo",
+      "name": "Delete Todo",
+      "description": "Delete a to-do item by ID.",
+      "path": "dist/methods/src/deleteTodo.ts",
+      "export": "deleteTodo"
+    }
+  ],
+  "interfaces": [
+    { "type": "web", "path": "dist/interfaces/web/web.json" },
+    { "type": "agent", "path": "dist/interfaces/agent/agent.json" }
+  ],
+  "scenarios": [
+    {
+      "id": "sample-todos",
+      "name": "Sample Todos",
+      "description": "A mix of completed and pending tasks with AI notes",
+      "path": "dist/methods/.scenarios/sampleTodos.ts",
+      "export": "sampleTodos",
+      "roles": []
+    }
+  ]
+}
