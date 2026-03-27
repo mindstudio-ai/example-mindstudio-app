@@ -5,8 +5,27 @@ import type {
   AbortablePromise,
   SendMessageResult,
 } from '@mindstudio-ai/interface';
+import { Streamdown } from 'streamdown';
+import { code } from '@streamdown/code';
+import { useStickToBottom } from 'use-stick-to-bottom';
+import TextareaAutosize from 'react-textarea-autosize';
 import { chat } from './api';
 import styles from './Chat.module.css';
+
+const streamdownPlugins = { code };
+
+const SUGGESTED_PROMPTS = [
+  "What's on my list?",
+  'Add a task for tomorrow',
+  'Help me plan my week',
+  'What should I focus on?',
+];
+
+function toolDisplayName(name: string): string {
+  return name
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export default function Chat() {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
@@ -15,19 +34,17 @@ export default function Chat() {
   const [input, setInput] = useState('');
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const [activeTools, setActiveTools] = useState<Map<string, string>>(
     new Map(),
   );
 
   const responseRef = useRef<AbortablePromise<SendMessageResult> | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const streamingTextRef = useRef(streamingText);
+  streamingTextRef.current = streamingText;
 
-  const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, []);
-
-  useEffect(scrollToBottom, [messages, streamingText, scrollToBottom]);
+  const { scrollRef, contentRef } = useStickToBottom();
 
   // Load threads on mount
   useEffect(() => {
@@ -38,6 +55,7 @@ export default function Chat() {
     setActiveThreadId(threadId);
     setMessages([]);
     setStreamingText('');
+    setIsThinking(false);
     const thread = await chat.getThread(threadId);
     setMessages(thread.messages);
   }, []);
@@ -48,6 +66,7 @@ export default function Chat() {
     setActiveThreadId(thread.id);
     setMessages([]);
     setStreamingText('');
+    setIsThinking(false);
     inputRef.current?.focus();
   }, []);
 
@@ -64,58 +83,64 @@ export default function Chat() {
     [activeThreadId],
   );
 
-  const sendMessage = useCallback(async () => {
-    const content = input.trim();
-    if (!content || !activeThreadId || isStreaming) return;
+  const doSend = useCallback(
+    async (content: string) => {
+      const trimmed = content.trim();
+      if (!trimmed || !activeThreadId || isStreaming) return;
 
-    setInput('');
-    setMessages((prev) => [...prev, { role: 'user', content }]);
-    setStreamingText('');
-    setActiveTools(new Map());
-    setIsStreaming(true);
-
-    const response = chat.sendMessage(activeThreadId, content, {
-      onText: (text) => setStreamingText(text),
-      onToolCallStart: (id, name) =>
-        setActiveTools((prev) => new Map(prev).set(id, name)),
-      onToolCallResult: (id) =>
-        setActiveTools((prev) => {
-          const next = new Map(prev);
-          next.delete(id);
-          return next;
-        }),
-      onError: (error) => console.error('Stream error:', error),
-    });
-
-    responseRef.current = response;
-
-    try {
-      await response;
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: streamingTextRef.current },
-      ]);
-    } catch (err) {
-      if ((err as Error).name !== 'AbortError') {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'assistant',
-            content: streamingTextRef.current || 'Something went wrong.',
-          },
-        ]);
-      }
-    } finally {
+      setInput('');
+      setMessages((prev) => [...prev, { role: 'user', content: trimmed }]);
       setStreamingText('');
       setActiveTools(new Map());
-      setIsStreaming(false);
-      responseRef.current = null;
-    }
-  }, [input, activeThreadId, isStreaming]);
+      setIsStreaming(true);
+      setIsThinking(true);
 
-  // Keep a ref to streamingText so the sendMessage closure can read the latest value
-  const streamingTextRef = useRef(streamingText);
-  streamingTextRef.current = streamingText;
+      const response = chat.sendMessage(activeThreadId, trimmed, {
+        onText: (delta) => {
+          setIsThinking(false);
+          setStreamingText((prev) => prev + delta);
+        },
+        onToolCallStart: (id, name) => {
+          setIsThinking(false);
+          setActiveTools((prev) => new Map(prev).set(id, name));
+        },
+        onToolCallResult: (id) =>
+          setActiveTools((prev) => {
+            const next = new Map(prev);
+            next.delete(id);
+            return next;
+          }),
+        onError: (error) => console.error('Stream error:', error),
+      });
+
+      responseRef.current = response;
+
+      try {
+        await response;
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: streamingTextRef.current },
+        ]);
+      } catch (err) {
+        if ((err as Error).name !== 'AbortError') {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'assistant',
+              content: streamingTextRef.current || 'Something went wrong.',
+            },
+          ]);
+        }
+      } finally {
+        setStreamingText('');
+        setActiveTools(new Map());
+        setIsStreaming(false);
+        setIsThinking(false);
+        responseRef.current = null;
+      }
+    },
+    [activeThreadId, isStreaming],
+  );
 
   const handleStop = useCallback(() => {
     responseRef.current?.abort();
@@ -124,7 +149,7 @@ export default function Chat() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      doSend(input);
     }
   };
 
@@ -161,57 +186,73 @@ export default function Chat() {
       <div className={styles.main}>
         {activeThreadId ? (
           <>
-            <div className={styles.messages}>
-              {messages.map((msg, i) =>
-                msg.toolCallId ? null : (
-                  <div
-                    key={i}
-                    className={styles.message}
-                    data-role={msg.role}
-                  >
-                    <div className={styles.bubble}>{msg.content}</div>
-                    {msg.toolCalls?.map((tc) => (
-                      <div key={tc.id} className={styles.toolCall}>
-                        Called {tc.name}
+            <div ref={scrollRef} className={styles.messages}>
+              <div ref={contentRef} className={styles.messagesInner}>
+                {messages.map((msg, i) =>
+                  msg.toolCallId ? null : (
+                    <div
+                      key={i}
+                      className={styles.message}
+                      data-role={msg.role}
+                    >
+                      {msg.role === 'assistant' ? (
+                        <Streamdown plugins={streamdownPlugins} mode="static">
+                          {msg.content}
+                        </Streamdown>
+                      ) : (
+                        <div className={styles.userBubble}>{msg.content}</div>
+                      )}
+                      {msg.toolCalls?.map((tc) => (
+                        <div key={tc.id} className={styles.toolCall}>
+                          {toolDisplayName(tc.name)}
+                        </div>
+                      ))}
+                    </div>
+                  ),
+                )}
+
+                {/* Thinking indicator */}
+                {isThinking && (
+                  <div className={styles.message} data-role="assistant">
+                    <div className={styles.thinking}>
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  </div>
+                )}
+
+                {/* Active tool calls */}
+                {activeTools.size > 0 && (
+                  <div className={styles.message} data-role="assistant">
+                    {[...activeTools.entries()].map(([id, name]) => (
+                      <div key={id} className={styles.toolCallActive}>
+                        {toolDisplayName(name)}
                       </div>
                     ))}
                   </div>
-                ),
-              )}
+                )}
 
-              {/* Active tool calls */}
-              {activeTools.size > 0 && (
-                <div className={styles.message} data-role="assistant">
-                  {[...activeTools.values()].map((name, i) => (
-                    <div key={i} className={styles.toolCallActive}>
-                      Running {name}...
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Streaming response */}
-              {streamingText && (
-                <div className={styles.message} data-role="assistant">
-                  <div className={styles.bubble}>
-                    {streamingText}
-                    <span className={styles.cursor} />
+                {/* Streaming response */}
+                {streamingText && (
+                  <div className={styles.message} data-role="assistant">
+                    <Streamdown plugins={streamdownPlugins}>
+                      {streamingText}
+                    </Streamdown>
                   </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
+                )}
+              </div>
             </div>
 
             <div className={styles.inputArea}>
-              <textarea
+              <TextareaAutosize
                 ref={inputRef}
                 className={styles.input}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Send a message..."
-                rows={1}
+                placeholder="What needs to get done?"
+                maxRows={5}
                 disabled={isStreaming}
               />
               {isStreaming ? (
@@ -221,7 +262,7 @@ export default function Chat() {
               ) : (
                 <button
                   className={styles.sendButton}
-                  onClick={sendMessage}
+                  onClick={() => doSend(input)}
                   disabled={!input.trim()}
                 >
                   Send
@@ -231,13 +272,29 @@ export default function Chat() {
           </>
         ) : (
           <div className={styles.emptyState}>
-            <p className={styles.emptyTitle}>Todo Assistant</p>
+            <p className={styles.emptyTitle}>What needs to get done?</p>
             <p className={styles.emptySubtitle}>
-              Start a conversation to manage your to-do list
+              I can manage your tasks, add notes, and help you stay organized.
             </p>
-            <button className={styles.startButton} onClick={createThread}>
-              New chat
-            </button>
+            <div className={styles.chips}>
+              {SUGGESTED_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  className={styles.chip}
+                  onClick={async () => {
+                    const thread = await chat.createThread();
+                    setThreads((prev) => [thread, ...prev]);
+                    setActiveThreadId(thread.id);
+                    setMessages([]);
+                    setStreamingText('');
+                    // Small delay to let state settle before sending
+                    setTimeout(() => doSend(prompt), 0);
+                  }}
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>

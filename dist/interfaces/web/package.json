@@ -12,6 +12,10 @@
     "@mindstudio-ai/interface": "github:mindstudio-ai/mindstudio-interface",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
+    "streamdown": "^2",
+    "@streamdown/code": "^1",
+    "use-stick-to-bottom": "^1",
+    "react-textarea-autosize": "^8",
     "swr": "^2.3.3",
     "wouter": "^3"
   },
