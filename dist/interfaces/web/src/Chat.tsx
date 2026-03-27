@@ -10,6 +10,7 @@ import { code } from '@streamdown/code';
 import { useStickToBottom } from 'use-stick-to-bottom';
 import TextareaAutosize from 'react-textarea-autosize';
 import { chat } from './api';
+import Nav from './Nav';
 import styles from './Chat.module.css';
 
 const streamdownPlugins = { code };
@@ -155,6 +156,7 @@ export default function Chat() {
 
   return (
     <div className={styles.page}>
+      <Nav />
       {/* Sidebar */}
       <div className={styles.sidebar}>
         <button className={styles.newThread} onClick={createThread}>

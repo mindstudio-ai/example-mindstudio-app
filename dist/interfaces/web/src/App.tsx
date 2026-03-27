@@ -1,6 +1,7 @@
 import { useRef, useState, useCallback } from 'react';
 import useSWR, { mutate } from 'swr';
 import api from './api';
+import Nav from './Nav';
 import styles from './App.module.css';
 
 interface Todo {
@@ -80,6 +81,7 @@ export default function App() {
 
   return (
     <div className={styles.page}>
+      <Nav />
       <div className={styles.content}>
         <div className={styles.header}>
           <h1 className={styles.title}>Todos</h1>
