@@ -36,9 +36,9 @@ export default function Chat() {
   const [streamingText, setStreamingText] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
-  const [activeTools, setActiveTools] = useState<Map<string, string>>(
-    new Map(),
-  );
+  const [activeTools, setActiveTools] = useState<
+    Map<string, { name: string; done: boolean }>
+  >(new Map());
 
   const responseRef = useRef<AbortablePromise<SendMessageResult> | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -85,9 +85,10 @@ export default function Chat() {
   );
 
   const doSend = useCallback(
-    async (content: string) => {
+    async (content: string, threadIdOverride?: string) => {
       const trimmed = content.trim();
-      if (!trimmed || !activeThreadId || isStreaming) return;
+      const threadId = threadIdOverride ?? activeThreadId;
+      if (!trimmed || !threadId || isStreaming) return;
 
       setInput('');
       setMessages((prev) => [...prev, { role: 'user', content: trimmed }]);
@@ -96,20 +97,21 @@ export default function Chat() {
       setIsStreaming(true);
       setIsThinking(true);
 
-      const response = chat.sendMessage(activeThreadId, trimmed, {
+      const response = chat.sendMessage(threadId, trimmed, {
         onText: (delta) => {
           setIsThinking(false);
           setStreamingText((prev) => prev + delta);
         },
         onToolCallStart: (id, name) => {
-          setIsThinking(false);
-          setActiveTools((prev) => new Map(prev).set(id, name));
+          setActiveTools((prev) =>
+            new Map(prev).set(id, { name, done: false }),
+          );
         },
         onToolCallResult: (id) =>
           setActiveTools((prev) => {
-            const next = new Map(prev);
-            next.delete(id);
-            return next;
+            const entry = prev.get(id);
+            if (!entry) return prev;
+            return new Map(prev).set(id, { ...entry, done: true });
           }),
         onError: (error) => console.error('Stream error:', error),
       });
@@ -143,6 +145,22 @@ export default function Chat() {
     [activeThreadId, isStreaming],
   );
 
+  const ensureThreadAndSend = useCallback(
+    async (content: string) => {
+      let threadId = activeThreadId;
+      if (!threadId) {
+        const thread = await chat.createThread();
+        setThreads((prev) => [thread, ...prev]);
+        setActiveThreadId(thread.id);
+        setMessages([]);
+        setStreamingText('');
+        threadId = thread.id;
+      }
+      doSend(content, threadId);
+    },
+    [activeThreadId, doSend],
+  );
+
   const handleStop = useCallback(() => {
     responseRef.current?.abort();
   }, []);
@@ -150,7 +168,7 @@ export default function Chat() {
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      doSend(input);
+      ensureThreadAndSend(input);
     }
   };
 
@@ -186,92 +204,68 @@ export default function Chat() {
 
       {/* Main chat area */}
       <div className={styles.main}>
-        {activeThreadId ? (
-          <>
-            <div ref={scrollRef} className={styles.messages}>
-              <div ref={contentRef} className={styles.messagesInner}>
-                {messages.map((msg, i) =>
-                  msg.toolCallId ? null : (
-                    <div
-                      key={i}
-                      className={styles.message}
-                      data-role={msg.role}
-                    >
-                      {msg.role === 'assistant' ? (
-                        <Streamdown plugins={streamdownPlugins} mode="static">
-                          {msg.content}
-                        </Streamdown>
-                      ) : (
-                        <div className={styles.userBubble}>{msg.content}</div>
-                      )}
-                      {msg.toolCalls?.map((tc) => (
-                        <div key={tc.id} className={styles.toolCall}>
-                          {toolDisplayName(tc.name)}
-                        </div>
-                      ))}
-                    </div>
-                  ),
-                )}
-
-                {/* Thinking indicator */}
-                {isThinking && (
-                  <div className={styles.message} data-role="assistant">
-                    <div className={styles.thinking}>
-                      <span />
-                      <span />
-                      <span />
-                    </div>
-                  </div>
-                )}
-
-                {/* Active tool calls */}
-                {activeTools.size > 0 && (
-                  <div className={styles.message} data-role="assistant">
-                    {[...activeTools.entries()].map(([id, name]) => (
-                      <div key={id} className={styles.toolCallActive}>
-                        {toolDisplayName(name)}
+        {messages.length > 0 || isStreaming ? (
+          <div ref={scrollRef} className={styles.messages}>
+            <div ref={contentRef} className={styles.messagesInner}>
+              {messages.map((msg, i) =>
+                msg.toolCallId ? null : (
+                  <div
+                    key={i}
+                    className={styles.message}
+                    data-role={msg.role}
+                  >
+                    {msg.role === 'assistant' ? (
+                      <Streamdown plugins={streamdownPlugins} mode="static">
+                        {msg.content}
+                      </Streamdown>
+                    ) : (
+                      <div className={styles.userBubble}>{msg.content}</div>
+                    )}
+                    {msg.toolCalls?.map((tc) => (
+                      <div key={tc.id} className={styles.toolCall}>
+                        {toolDisplayName(tc.name)}
                       </div>
                     ))}
                   </div>
-                )}
+                ),
+              )}
 
-                {/* Streaming response */}
-                {streamingText && (
-                  <div className={styles.message} data-role="assistant">
-                    <Streamdown plugins={streamdownPlugins}>
-                      {streamingText}
-                    </Streamdown>
+              {/* Thinking indicator */}
+              {isThinking && (
+                <div className={styles.message} data-role="assistant">
+                  <div className={styles.thinking}>
+                    <span />
+                    <span />
+                    <span />
                   </div>
-                )}
-              </div>
-            </div>
+                </div>
+              )}
 
-            <div className={styles.inputArea}>
-              <TextareaAutosize
-                ref={inputRef}
-                className={styles.input}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="What needs to get done?"
-                maxRows={5}
-                disabled={isStreaming}
-              />
-              {isStreaming ? (
-                <button className={styles.stopButton} onClick={handleStop}>
-                  Stop
-                </button>
-              ) : (
-                <button
-                  className={styles.sendButton}
-                  onClick={() => doSend(input)}
-                  disabled={!input.trim()}
-                >
-                  Send
-                </button>
+              {/* Active tool calls */}
+              {activeTools.size > 0 && (
+                <div className={styles.message} data-role="assistant">
+                  {[...activeTools.entries()].map(([id, { name, done }]) => (
+                    <div
+                      key={id}
+                      className={styles.toolCallActive}
+                      data-done={done || undefined}
+                    >
+                      {done ? toolDisplayName(name) : `${toolDisplayName(name)}...`}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Streaming response */}
+              {streamingText && (
+                <div className={styles.message} data-role="assistant">
+                  <Streamdown plugins={streamdownPlugins}>
+                    {streamingText}
+                  </Streamdown>
+                </div>
               )}
             </div>
-          </>
+          </div>
         ) : (
           <div className={styles.emptyState}>
             <p className={styles.emptyTitle}>What needs to get done?</p>
@@ -283,15 +277,7 @@ export default function Chat() {
                 <button
                   key={prompt}
                   className={styles.chip}
-                  onClick={async () => {
-                    const thread = await chat.createThread();
-                    setThreads((prev) => [thread, ...prev]);
-                    setActiveThreadId(thread.id);
-                    setMessages([]);
-                    setStreamingText('');
-                    // Small delay to let state settle before sending
-                    setTimeout(() => doSend(prompt), 0);
-                  }}
+                  onClick={() => ensureThreadAndSend(prompt)}
                 >
                   {prompt}
                 </button>
@@ -299,6 +285,32 @@ export default function Chat() {
             </div>
           </div>
         )}
+
+        <div className={styles.inputArea}>
+          <TextareaAutosize
+            ref={inputRef}
+            className={styles.input}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="What needs to get done?"
+            maxRows={5}
+            disabled={isStreaming}
+          />
+          {isStreaming ? (
+            <button className={styles.stopButton} onClick={handleStop}>
+              Stop
+            </button>
+          ) : (
+            <button
+              className={styles.sendButton}
+              onClick={() => ensureThreadAndSend(input)}
+              disabled={!input.trim()}
+            >
+              Send
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

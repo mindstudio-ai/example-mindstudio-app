@@ -105,7 +105,7 @@
 .messagesInner {
   max-width: 720px;
   margin: 0 auto;
-  padding: 32px 24px;
+  padding: 48px 24px 32px;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -178,6 +178,11 @@
   background: var(--color-surface);
   border-radius: 8px;
   animation: pulse 1.5s ease-in-out infinite;
+}
+
+.toolCallActive[data-done] {
+  animation: none;
+  color: var(--color-text-muted);
 }
 
 @keyframes pulse {
